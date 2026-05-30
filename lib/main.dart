@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import 'core/api_client.dart';
 import 'core/connection.dart';
+import 'core/socket_service.dart';
 
 import 'features/files/file_list_widget.dart';
 import 'features/connect/qr_scanner_screen.dart';
+import 'features/connect/session_service.dart';
 
 void main() {
   runApp(const MyApp());
@@ -42,6 +44,8 @@ class Home extends StatefulWidget {
 
 class _HomeState extends State<Home> {
   final ipController = TextEditingController();
+  final _refreshNotifier = ValueNotifier(0);
+  final _socket = SocketService();
 
   bool connecting = false;
   String? connectionError;
@@ -63,17 +67,20 @@ class _HomeState extends State<Home> {
     try {
       final baseUrl = "http://$ip:3000";
       final api = ApiClient(baseUrl);
+      final sessionService = SessionService(api);
 
       await api.get("/ping");
 
-      final sessionData = await api.get("/session/host");
-      final sessionId = sessionData['sessionId'] as String;
-      await api.get("/session/$sessionId/join");
+      final host = await sessionService.getHostSession();
+      await sessionService.joinSession(host.sessionId);
 
       if (!mounted) return;
 
+      _socket.connect(baseUrl, host.sessionId);
+      _socket.onFileUploaded = (_) => _refreshNotifier.value++;
+
       setState(() {
-        connection = Connection.createSession(baseUrl, sessionId);
+        connection = Connection.createSession(baseUrl, host.sessionId);
         connecting = false;
         connectionError = null;
       });
@@ -91,6 +98,7 @@ class _HomeState extends State<Home> {
   // DISCONNECT
   // =========================
   void disconnect() {
+    _socket.disconnect();
     setState(() {
       connection = null;
       connectionError = null;
@@ -219,6 +227,13 @@ class _HomeState extends State<Home> {
                                       MaterialPageRoute(
                                         builder: (_) => QRScannerScreen(
                                           onConnected: (url, sessionId) {
+                                            if (sessionId != null) {
+                                              _socket.connect(
+                                                  url, sessionId);
+                                              _socket.onFileUploaded = (_) =>
+                                                  _refreshNotifier.value++;
+                                            }
+
                                             setState(() {
                                               connection =
                                                   sessionId != null
@@ -277,6 +292,7 @@ class _HomeState extends State<Home> {
                     )
                   : FileListWidget(
                       service: connection!.fileService,
+                      refreshNotifier: _refreshNotifier,
                     ),
             ),
           ],

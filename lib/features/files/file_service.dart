@@ -1,6 +1,6 @@
-import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../../core/api_client.dart';
+import '../../core/download_service.dart';
 import 'file_model.dart';
 
 class FileService {
@@ -20,7 +20,7 @@ class FileService {
 }
 
 extension FileDownload on FileService {
-  Future<void> downloadFile(String filename) async {
+  Future<String> downloadFile(String filename) async {
     final ep = _hasSession
         ? '/session/$sessionId/download/$filename'
         : '/download/$filename';
@@ -32,13 +32,8 @@ extension FileDownload on FileService {
       throw Exception('Download failed ${res.statusCode}');
     }
 
-    final dir = Directory("/storage/emulated/0/Download");
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-
-    final file = File('${dir.path}/$filename');
-    await file.writeAsBytes(res.bodyBytes);
+    final file = await DownloadService.saveFile(filename, res.bodyBytes);
+    return file.path;
   }
 }
 

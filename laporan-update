@@ -1,0 +1,195 @@
+# Laporan Update YamiSend
+
+## Arsitektur & Stack
+- **Backend:** Node.js + Express + TypeScript + `ws` (WebSocket) + Multer (upload)
+- **Frontend Mobile:** Flutter (Android) + `http` + `web_socket_channel` + `mobile_scanner` (QR)
+- **CLI:** Built-in di server (readline), bisa kirim file dari laptop
+- **Port:** 3000
+- **WebSocket:** Port sama (3000), upgrade dari HTTP, path `/` dengan query `?sessionId=xxx`
+
+---
+
+## Fitur & Kemampuan Lengkap
+
+### 1. Host Session (Backend Startup)
+**File:** `yamisend-server/src/server.ts`
+- Server start → `initHostSession()` bikin satu host session (UUID random)
+- Upload folder: `src/uploads/<sessionId>/` (semua client HP & CLI share folder yang sama)
+- QR code langsung tampil di terminal saat startup
+- CLI langsung aktif (prompt `>`)
+
+### 2. Session Management
+**File:** `yamisend-server/src/routes/session.route.ts`
+**File:** `yamisend-server/src/sessions/session.store.ts`
+**File:** `yamisend-server/src/sessions/host.session.ts`
+- **GET `/session/host`** — Ambil host session (dipanggil Flutter saat manual connect IP)
+- **GET `/session/create`** — Buat session baru + QR (untuk SessionScreen)
+- **GET `/session/:id/join`** — Join session (mendaftarkan IP sebagai client, dipanggil HP)
+- **GET `/session/:id/files`** — List file di session
+- **GET `/session/:id/download/:filename`** — Download file dari session
+- **POST `/session/:id/upload`** — Upload file ke session (broadcast WebSocket)
+- Session store in-memory (`Map<string, Session>`)
+
+### 3. Upload (HP → Laptop)
+**File:** `yami_send/lib/features/files/file_service.dart` (extension `FileUpload`)
+**File:** `yamisend-server/src/routes/session.route.ts` (POST `/session/:id/upload`)
+- HP pilih file pake `file_picker`
+- Upload via `http.MultipartRequest`
+- Server simpan di `src/uploads/<sessionId>/`
+- Nama file: `timestamp-originalName` (multer)
+- Broadcast WS event `file_uploaded` ke semua client di session yang sama
+
+### 4. Download (Laptop → HP)
+**File:** `yami_send/lib/features/files/file_service.dart` (extension `FileDownload`)
+**File:** `yami_send/lib/core/download_service.dart`
+- HP minta file → `GET /session/:id/download/:filename`
+- Response dikirim sebagai bytes
+- Disimpan otomatis ke folder sesuai tipe:
+  - `jpg/jpeg/png/gif/webp/svg/bmp` → `Pictures/YamiSend/`
+  - `mp4/mkv/avi/mov/wmv` → `Movies/YamiSend/`
+  - `mp3/wav/aac/ogg/flac` → `Music/YamiSend/`
+  - `pdf/doc/docx/xls/xlsx/ppt/pptx/txt/zip/rar` → `Documents/YamiSend/`
+  - lainnya → `Download/YamiSend/`
+- Base path: `/storage/emulated/0/`
+
+### 5. WebSocket Realtime
+**File:** `yamisend-server/src/socket/socket.manager.ts`
+**File:** `yami_send/lib/core/socket_service.dart`
+- WS server di port 3000 (satu server dengan HTTP)
+- Flutter connect: `ws://<ip>:3000?sessionId=xxx`
+- Event: `file_uploaded` — data: `{ filename, originalName, size }`
+- Flutter `SocketService` → `ValueNotifier<int>` → `FileListWidget` auto refresh
+- WS auto-connect setelah session established
+- WS disconnect saat manual disconnect
+
+### 6. CLI (Laptop)
+**File:** `yamisend-server/src/cli/host.cli.ts`
+- `help` — Tampilkan menu bantuan (lengkap deskripsi)
+- `clients` — Lihat daftar IP client yang terhubung ke session
+- `files` — Lihat daftar file yang sudah di-upload di session
+- `qr` — Generate QR code ASCII di terminal, bisa di-scan HP
+- `send <file>` — Copy file dari laptop ke folder session + broadcast WS → HP auto refresh
+- `clear` — Hapus semua file + buang session lama, bikin session baru + QR baru
+- `exit` — Keluar dari YamiSend
+
+### 7. Flutter Client Connection
+**File:** `yami_send/lib/main.dart`
+**File:** `yami_send/lib/features/connect/qr_scanner_screen.dart`
+**File:** `yami_send/lib/core/connection.dart`
+- **Manual Connect:** Masukin IP → `GET /session/host` → `GET /session/:id/join` → `Connection.createSession`
+- **QR Scan:** Scan QR → extract `sessionId` dari URL → `Connection.createSession`
+- **SessionScreen:** `GET /session/create` → tampilkan QR → HP lain scan → join session
+- Semua flow converge ke `Connection.createSession` → buat `FileService` + `SocketService`
+
+### 8. File List (Flutter UI)
+**File:** `yami_send/lib/features/files/file_list_widget.dart`
+**File:** `yami_send/lib/features/files/file_model.dart`
+- ListView dengan setiap file: icon (sesuai tipe), nama, ukuran, tanggal
+- Upload button
+- Refresh button + pull-to-refresh
+- Download button per file → progress spinner saat download
+- **Status icon:** file sudah di-download → `check_circle` hijau; belum → icon `download`
+- Snackbar notifikasi: upload sukses, download sukses (+ path), error
+
+### 9. Non-Session Fallback
+**File:** `yami_send/lib/features/files/file_service.dart`
+- Endpoint non-session: `/files`, `/upload`, `/download`
+- Dipakai saat `sessionId` kosong (band-aid)
+- Upload ke `src/uploads/` (global)
+
+---
+
+## Alur Data (Flow)
+
+### Upload HP → Laptop
+```
+HP pick file
+  → POST /session/:id/upload (multipart)
+  → Server simpan di src/uploads/<sessionId>/
+  → Server broadcast WS "file_uploaded"
+  → HP (via WS) & Laptop (via CLI files) lihat file baru
+```
+
+### Download Laptop → HP
+```
+HP tap download icon
+  → GET /session/:id/download/:filename
+  → Server kirim file bytes
+  → DownloadService.saveFile(filename, bytes)
+  → Tersimpan di /storage/emulated/0/<type>/YamiSend/<filename>
+  → Snackbar kasih tau path lengkap
+  → Icon berubah jadi check hijau
+```
+
+### Send CLI → HP
+```
+Laptop: send /path/to/video.mp4
+  → Copy file ke src/uploads/<sessionId>/video.mp4
+  → emitFileUploaded() via WS
+  → HP auto refresh (WS event → ValueNotifier → load())
+  → HP lihat file baru + bisa download
+```
+
+---
+
+## Perubahan & Fix (Update Terakhir)
+
+### 1. Fix Error `ValueNotifier.listen`
+**File:** `yami_send/lib/features/files/file_list_widget.dart`
+- `ValueNotifier` di Flutter pakai `addListener`/`removeListener`, bukan `listen`/`cancel`
+- Ganti `StreamSubscription` + `_sub?.cancel()` → `VoidCallback` + `removeListener()`
+- Hapus import `dart:async` yang tidak terpakai
+
+### 2. Hapus Import `dart:io` Tidak Terpakai
+**File:** `yami_send/lib/features/files/file_service.dart`
+- `dart:io` sudah tidak dipakai karena operasi file ditangani `DownloadService`
+- Dihapus
+
+### 3. Snackbar Download Menampilkan Path
+**File:** `yami_send/lib/features/files/file_service.dart`
+- `downloadFile()` sekarang return `String` (path file tersimpan)
+**File:** `yami_send/lib/features/files/file_list_widget.dart`
+- Snackbar berubah dari `"$name berhasil diunduh"` → `"$name tersimpan di $path"`
+- Durasi snackbar diperpanjang jadi 4 detik
+
+### 4. CLI QR Code ASCII
+**File:** `yamisend-server/src/cli/host.cli.ts`
+- Perintah `qr` sekarang generate QR code ASCII di terminal (pake `qrcode-terminal`)
+- Bisa langsung di-scan HP tanpa URL text
+
+### 5. CLI `send` Broadcast WebSocket
+**File:** `yamisend-server/src/cli/host.cli.ts`
+- Setelah copy file, CLI sekarang panggil `emitFileUploaded()` via WebSocket
+- Client HP auto-refresh tanpa perlu manual refresh
+
+### 6. CLI Help Deskriptif
+**File:** `yamisend-server/src/cli/host.cli.ts`
+- Setiap perintah di `help` sekarang ada deskripsi singkat
+
+### 7. CLI `clear` — Hapus Session & Buat Baru
+**File:** `yamisend-server/src/sessions/session.store.ts`
+- Tambah fungsi `deleteSession(id)` — hapus folder uploads + session dari store
+**File:** `yamisend-server/src/sessions/host.session.ts`
+- Tambah fungsi `resetHostSession()` — hapus session lama, buat UUID baru + folder baru
+**File:** `yamisend-server/src/cli/host.cli.ts`
+- `sessionId` dan `sessionUrl` jadi `let` (mutable)
+- Perintah `clear`: reset session, tampilkan QR baru
+
+### 8. File Download Status (Check Icon)
+**File:** `yami_send/lib/core/download_service.dart`
+- Tambah method `isDownloaded(filename)` — ngecek apakah file sudah ada di lokal
+**File:** `yami_send/lib/features/files/file_list_widget.dart`
+- `load()` sekarang cek file yang sudah ada di lokal, simpan di Set `downloaded`
+- Trailing icon: file yang sudah di-download → icon `check_circle` hijau
+- File yang belum → icon `download` (bisa diklik)
+- Setelah download sukses, langsung masuk ke `downloaded` set biar icon berubah
+
+---
+
+## Catatan Penting
+- **Backend compile:** 0 error TypeScript
+- **Flutter:** passing analysis (hanya info minor `prefer_final_fields` di `_baseDir`)
+- **Session in-memory:** hilang kalau server restart (belum ada persistence)
+- **Upload path session:** `src/uploads/<sessionId>/` — semua client share folder yang sama
+- **Upload path non-session:** `src/uploads/` (global)
+- **Android scoped storage:** file mungkin tidak kelihatan di file manager Android 11+ walau tersimpan

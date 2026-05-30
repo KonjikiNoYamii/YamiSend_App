@@ -1,5 +1,5 @@
 import '../../core/api_client.dart';
-import 'session_model.dart';
+import 'session_model.dart'; // SessionQR, HostSessionResponse
 
 class SessionService {
   final ApiClient api;
@@ -13,5 +13,10 @@ class SessionService {
 
   Future<void> joinSession(String sessionId) async {
     await api.get("/session/$sessionId/join");
+  }
+
+  Future<HostSessionResponse> getHostSession() async {
+    final data = await api.get("/session/host");
+    return HostSessionResponse.fromJson(data);
   }
 }

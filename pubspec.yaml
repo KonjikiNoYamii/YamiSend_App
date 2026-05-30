@@ -36,6 +36,7 @@ dependencies:
   http: ^1.6.0
   file_picker: ^11.0.2
   mobile_scanner: ^6.0.5
+  web_socket_channel: ^3.0.2
 
 dev_dependencies:
   flutter_test:

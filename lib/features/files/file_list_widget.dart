@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import '../../core/download_service.dart';
 import 'file_service.dart';
 import 'file_model.dart';
 
 class FileListWidget extends StatefulWidget {
   final FileService service;
+  final ValueNotifier<int>? refreshNotifier;
 
-  const FileListWidget({super.key, required this.service});
+  const FileListWidget({
+    super.key,
+    required this.service,
+    this.refreshNotifier,
+  });
 
   @override
   State<FileListWidget> createState() => _FileListWidgetState();
@@ -18,6 +24,7 @@ class _FileListWidgetState extends State<FileListWidget> {
   bool uploading = false;
   String? error;
   Set<String> downloading = {};
+  Set<String> downloaded = {};
 
   Future<void> load() async {
     setState(() {
@@ -32,23 +39,36 @@ class _FileListWidgetState extends State<FileListWidget> {
       files = [];
     }
 
+    final exist = <String>{};
+    for (final f in files) {
+      if (await DownloadService.isDownloaded(f.name)) {
+        exist.add(f.name);
+      }
+    }
+
     if (!mounted) return;
-    setState(() => loading = false);
+    setState(() {
+      loading = false;
+      downloaded = exist;
+    });
   }
 
   Future<void> download(String name) async {
     setState(() => downloading.add(name));
 
     try {
-      await widget.service.downloadFile(name);
+      final path = await widget.service.downloadFile(name);
 
       if (!mounted) return;
 
+      setState(() => downloaded.add(name));
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("$name berhasil diunduh"),
+          content: Text("$name tersimpan di $path"),
           backgroundColor: Colors.green.shade700,
           behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
         ),
       );
     } catch (e) {
@@ -147,10 +167,23 @@ class _FileListWidgetState extends State<FileListWidget> {
     }
   }
 
+  VoidCallback? _refreshListener;
+
   @override
   void initState() {
     super.initState();
     load();
+
+    _refreshListener = () => load();
+    widget.refreshNotifier?.addListener(_refreshListener!);
+  }
+
+  @override
+  void dispose() {
+    if (_refreshListener != null) {
+      widget.refreshNotifier?.removeListener(_refreshListener!);
+    }
+    super.dispose();
   }
 
   @override
@@ -296,12 +329,15 @@ class _FileListWidgetState extends State<FileListWidget> {
                     height: 24,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : IconButton(
-                    icon: const Icon(Icons.download),
-                    tooltip: "Unduh",
-                    color: theme.colorScheme.primary,
-                    onPressed: () => download(f.name),
-                  ),
+                : downloaded.contains(f.name)
+                    ? const Icon(Icons.check_circle,
+                        color: Colors.green, size: 22)
+                    : IconButton(
+                        icon: const Icon(Icons.download),
+                        tooltip: "Unduh",
+                        color: theme.colorScheme.primary,
+                        onPressed: () => download(f.name),
+                      ),
           );
         },
       ),

@@ -17,3 +17,20 @@ class SessionQR {
     );
   }
 }
+
+class HostSessionResponse {
+  final String sessionId;
+  final String baseUrl;
+
+  HostSessionResponse({
+    required this.sessionId,
+    required this.baseUrl,
+  });
+
+  factory HostSessionResponse.fromJson(Map<String, dynamic> json) {
+    return HostSessionResponse(
+      sessionId: json['sessionId'],
+      baseUrl: json['baseUrl'],
+    );
+  }
+}
