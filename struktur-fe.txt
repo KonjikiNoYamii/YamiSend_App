@@ -1,0 +1,120 @@
+=== STRUKTUR FRONTEND YAMISEND (FLUTTER) ===
+
+yami_send/
+├── pubspec.yaml                      # Konfigurasi project & dependensi
+├── analysis_options.yaml             # Aturan linting Dart
+├── test/
+│   └── widget_test.dart              # Test widget default
+│
+└── lib/
+    ├── main.dart                     # ENTRY POINT — Home page
+    │
+    ├── core/
+    │   ├── api_client.dart           # HTTP client wrapper
+    │   ├── connection.dart           # Model: Connection + factory
+    │   └── connection_result.dart    # Model: ConnectionResult (UNUSED)
+    │
+    └── features/
+        ├── connect/                  # FITUR QR PAIRING
+        │   ├── qr_scanner_screen.dart  # Screen: kamera scan QR → auto-connect
+        │   ├── session_screen.dart     # Screen: tampil QR session + tombol Continue
+        │   ├── session_service.dart    # Service: create/join session API
+        │   └── session_model.dart      # Model: SessionQR data
+        │
+        └── files/                    # FITUR FILE MANAGEMENT
+            ├── file_model.dart         # Model: FileItem (name, size, createdAt)
+            ├── file_service.dart       # Service: fetchFiles, downloadFile, uploadFile
+            └── file_list_widget.dart   # Widget: daftar file + upload & download
+
+
+=== PENJELASAN TIAP FILE ===
+
+1. pubspec.yaml
+   - Dependencies: cupertino_icons, http, file_picker, mobile_scanner, uuid (UNUSED)
+   - Dev: flutter_test, flutter_lints
+   - SDK: ^3.12.0
+
+2. analysis_options.yaml
+   - Include: package:flutter_lints/flutter.yaml
+
+3. lib/main.dart
+   - Entry point Flutter
+   - MyApp: MaterialApp tema M3 (light/dark), home: Home()
+   - Home (StatefulWidget): halaman utama
+   - State: ipController, connecting, connectionError, Connection?
+   - Method:
+     • connectManually() — input IP → GET /ping → create Connection
+     • disconnect() — null-kan connection
+   - UI:
+     • AppBar dengan tombol disconnect (icon link_off)
+     • Card panel: input IP + tombol Connect + tombol Scan
+     • Body: jika null → placeholder, jika terisi → FileListWidget
+
+4. lib/core/api_client.dart
+   - Class ApiClient(baseUrl)
+   - get(endpoint) → HTTP GET + JSON decode, timeout 10 detik
+   - Throw jika status != 200
+
+5. lib/core/connection.dart
+   - Class Connection(baseUrl, sessionId, fileService)
+   - Factory create(baseUrl) → mode normal (sessionId: '')
+   - Factory createSession(baseUrl, sessionId) → mode pairing
+
+6. lib/core/connection_result.dart
+   - Class ConnectionResult(baseUrl, sessionId)
+   - Status: TIDAK DIGUNAKAN (dead code)
+
+7. lib/features/connect/qr_scanner_screen.dart
+   - Screen kamera scan QR
+   - Pakai package mobile_scanner
+   - Scan → parse URL → extract origin + sessionId → /session/:id/join
+   - Jika sukses → onConnected(baseUrl) → pop
+   - Jika gagal → error + tombol Scan Lagi
+   - Tombol flash di AppBar
+
+8. lib/features/connect/session_screen.dart
+   - Screen untuk pairing session
+   - Panggil GET /session/create
+   - Tampilkan QR code (base64 decode) + sessionId
+   - Tombol Continue untuk lanjut
+
+9. lib/features/connect/session_service.dart
+   - Class SessionService(api)
+   - createSession() → GET /session/create → SessionQR
+   - joinSession(sessionId) → GET /session/:id/join
+
+10. lib/features/connect/session_model.dart
+    - Class SessionQR(sessionId, url, qr)
+    - Factory fromJson
+
+11. lib/features/files/file_model.dart
+    - Class FileItem(name, size, createdAt)
+    - Factory fromJson
+
+12. lib/features/files/file_service.dart
+    - Class FileService(api, sessionId)
+    - fetchFiles() → GET /session/:id/files
+    - Extension FileDownload:
+      • downloadFile(filename) → GET /session/:id/download/:filename → simpan
+    - Extension FileUpload:
+      • uploadFile(filePath) → POST /session/:id/upload (multipart)
+
+13. lib/features/files/file_list_widget.dart
+    - Widget daftar file dari server
+    - Fitur:
+      • ListView dengan icon file by tipe (image, movie, pdf, zip, dll)
+      • Format ukuran: B, KB, MB, GB
+      • Tombol download per-item (spinner saat proses)
+      • Tombol Upload (FilePicker → upload → refresh)
+      • Tombol Refresh (icon)
+      • Pull-to-refresh
+      • Empty state + error state + loading state
+      • SnackBar sukses/gagal
+
+
+=== ALUR APLIKASI ===
+
+1. Buka app → input IP → tap Connect → GET /ping → konek
+2. Atau tap Scan → scan QR (dari /qr/page browser) → connect
+3. Tap Upload → pilih file → POST /upload → file tersimpan di server
+4. Tap download per file → GET /download → simpan ke Download/
